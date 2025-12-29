@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { getEventAvailability } from "@/app/actions"
+import { createClient } from "@/lib/supabase/client"
 import type { Availability } from "@/types/availability"
 
 interface GroupCalendarProps {
@@ -36,6 +37,28 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
       }
     }
     fetchData()
+
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`availability-${eventId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "availability",
+          filter: `event_id=eq.${eventId}`,
+        },
+        (payload: any) => {
+          fetchData()
+        },
+      )
+      .subscribe()
+
+    // Cleanup subscription on unmount
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [eventId])
 
   const generateDates = () => {

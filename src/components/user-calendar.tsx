@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { saveAvailability, deleteAvailability, getUserAvailability } from "@/app/actions"
 import type { Availability } from "@/types/availability"
 
@@ -18,19 +18,20 @@ interface UserCalendarProps {
 
 export function UserCalendar({ eventId, userId, userName, startDate, endDate, startTime, endTime }: UserCalendarProps) {
   const [selectedSlots, setSelectedSlots] = useState<Set<string>>(new Set())
-  const [isDragging, setIsDragging] = useState(false)
-  const [dragMode, setDragMode] = useState<"select" | "deselect" | null>(null)
+  const isDragging = useRef(false)
+  const dragMode = useRef<"select" | "deselect" | null>(null)
+  const pendingSaves = useRef<Set<string>>(new Set())
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle")
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null)
 
   const handleMouseUp = () => {
-    setIsDragging(false)
-    setDragMode(null)
+    isDragging.current = false
+    dragMode.current = null
   }
 
   const handleTouchEnd = () => {
-    setIsDragging(false)
-    setDragMode(null)
+    isDragging.current = false
+    dragMode.current = null
   }
 
   useEffect(() => {
@@ -91,6 +92,13 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
 
   const toggleSlot = async (date: string, time: string) => {
     const slotId = `${date}-${time}`
+
+    if (pendingSaves.current.has(slotId)) {
+      return
+    }
+
+    pendingSaves.current.add(slotId)
+
     const newSelected = new Set(selectedSlots)
     const wasSelected = newSelected.has(slotId)
 
@@ -100,26 +108,21 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
       newSelected.add(slotId)
     }
 
-    // Optimistic update
     setSelectedSlots(newSelected)
 
-    // Show saving indicator
     setSaveStatus("saving")
 
-    // Clear existing timeout
     if (saveTimeout) {
       clearTimeout(saveTimeout)
     }
 
     try {
-      // Save or delete from database
       if (wasSelected) {
         await deleteAvailability(eventId, userId, date, time)
       } else {
         await saveAvailability(eventId, userId, date, time)
       }
 
-      // Show saved status briefly
       setSaveStatus("saved")
       const timeout = setTimeout(() => {
         setSaveStatus("idle")
@@ -127,11 +130,12 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
       setSaveTimeout(timeout)
     } catch (error) {
       console.error("Failed to save availability:", error)
-      // Revert optimistic update on error
       setSelectedSlots(
         wasSelected ? new Set([...newSelected, slotId]) : new Set([...newSelected].filter((s) => s !== slotId)),
       )
       setSaveStatus("idle")
+    } finally {
+      pendingSaves.current.delete(slotId)
     }
   }
 
@@ -139,40 +143,51 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
     const slotId = `${date}-${time}`
     const isCurrentlySelected = selectedSlots.has(slotId)
 
-    setDragMode(isCurrentlySelected ? "deselect" : "select")
-    setIsDragging(true)
+    dragMode.current = isCurrentlySelected ? "deselect" : "select"
+    isDragging.current = false
 
     toggleSlot(date, time)
   }
 
   const handleTouchStart = (e: React.TouchEvent, date: string, time: string) => {
-    e.preventDefault()
     handleMouseDown(date, time)
   }
 
   const handleMouseEnter = (date: string, time: string) => {
-    if (isDragging && dragMode) {
+    if (isDragging.current && dragMode.current) {
       const slotId = `${date}-${time}`
       const isCurrentlySelected = selectedSlots.has(slotId)
 
-      if (dragMode === "select" && !isCurrentlySelected) {
+      if (dragMode.current === "select" && !isCurrentlySelected) {
         toggleSlot(date, time)
-      } else if (dragMode === "deselect" && isCurrentlySelected) {
+      } else if (dragMode.current === "deselect" && isCurrentlySelected) {
         toggleSlot(date, time)
       }
+    } else if (dragMode.current !== null) {
+      isDragging.current = true
     }
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (isDragging && dragMode) {
-      e.preventDefault()
+    if (dragMode.current !== null) {
+      isDragging.current = true
+    }
+
+    if (isDragging.current && dragMode.current) {
       const touch = e.touches[0]
       const element = document.elementFromPoint(touch.clientX, touch.clientY)
       if (element && element.hasAttribute("data-date") && element.hasAttribute("data-time")) {
         const date = element.getAttribute("data-date")
         const time = element.getAttribute("data-time")
         if (date && time) {
-          handleMouseEnter(date, time)
+          const slotId = `${date}-${time}`
+          const isCurrentlySelected = selectedSlots.has(slotId)
+
+          if (dragMode.current === "select" && !isCurrentlySelected) {
+            toggleSlot(date, time)
+          } else if (dragMode.current === "deselect" && isCurrentlySelected) {
+            toggleSlot(date, time)
+          }
         }
       }
     }
@@ -254,6 +269,7 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
                     onMouseDown={() => handleMouseDown(dateString, time)}
                     onMouseEnter={() => handleMouseEnter(dateString, time)}
                     onTouchStart={(e) => handleTouchStart(e, dateString, time)}
+                    style={{ touchAction: "none" }}
                     className={`p-0 h-4 md:h-7 border transition-colors cursor-pointer ${
                       isSelected ? "bg-green-500 text-white hover:bg-green-600" : "bg-muted/30 hover:bg-muted"
                     }`}
