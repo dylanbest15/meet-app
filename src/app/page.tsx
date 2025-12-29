@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { createEvent, getEvent, getUser } from "./actions"
-import { Calendar } from "@/components/calendar"
+import { UserCalendar } from "@/components/user-calendar"
+import { GroupCalendar } from "@/components/group-calendar"
 import { ChevronLeft } from "lucide-react"
 
 interface Event {
@@ -68,28 +69,19 @@ export default function Home() {
 
     if (eventId && userId) {
       async function fetchData() {
-        console.log("[v0] Fetching event:", eventId, "and user:", userId)
         try {
           const [eventResult, userResult] = await Promise.all([getEvent(eventId), getUser(userId)])
 
-          console.log("[v0] Event result:", eventResult)
-          console.log("[v0] User result:", userResult)
-
           if (eventResult.event) {
             setEvent(eventResult.event)
-          } else {
-            console.error("[v0] No event found in result")
           }
 
           if (userResult.user) {
             setCurrentUserName(userResult.user.name)
-          } else {
-            console.error("[v0] No user found in result")
           }
         } catch (error) {
-          console.error("[v0] Error fetching data:", error)
+          console.error("Error fetching data:", error)
         } finally {
-          // Always set loading to false, even if there's an error
           setLoading(false)
         }
       }
@@ -204,7 +196,7 @@ export default function Home() {
         {event && (
           <div className="w-full md:grid md:grid-cols-2 md:gap-8 md:pt-2">
             <div className="flex justify-center">
-              <Calendar
+              <UserCalendar
                 eventId={eventId}
                 userId={userId}
                 userName={currentUserName}
@@ -214,7 +206,15 @@ export default function Home() {
                 endTime={event.endTime}
               />
             </div>
-            <div className="hidden md:block">{/* Future: Group availability calendar */}</div>
+            <div className="flex justify-center mt-8 md:mt-0">
+              <GroupCalendar
+                eventId={eventId}
+                startDate={event.startDate}
+                endDate={event.endDate}
+                startTime={event.startTime}
+                endTime={event.endTime}
+              />
+            </div>
           </div>
         )}
 

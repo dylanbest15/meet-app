@@ -242,3 +242,47 @@ export async function getUser(userId: string) {
 
   return { user: data }
 }
+
+export async function getEventAvailability(eventId: string) {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+          } catch {
+            // Handle cookie setting errors
+          }
+        },
+      },
+    },
+  )
+
+  // Get all availability for this event
+  const { data: availabilityData, error: availabilityError } = await supabase
+    .from("availability")
+    .select("*")
+    .eq("event_id", eventId)
+
+  if (availabilityError) {
+    return { error: availabilityError.message, availability: [], totalUsers: 0 }
+  }
+
+  // Get total number of users in this event
+  const { count: totalUsers, error: countError } = await supabase
+    .from("users")
+    .select("*", { count: "exact", head: true })
+    .eq("event_id", eventId)
+
+  if (countError) {
+    return { error: countError.message, availability: availabilityData, totalUsers: 0 }
+  }
+
+  return { availability: availabilityData, totalUsers: totalUsers || 0 }
+}

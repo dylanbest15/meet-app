@@ -6,7 +6,7 @@ import { useState, useEffect } from "react"
 import { saveAvailability, deleteAvailability, getUserAvailability } from "@/app/actions"
 import type { Availability } from "@/types/availability"
 
-interface CalendarProps {
+interface UserCalendarProps {
   eventId: string
   userId: string
   userName: string
@@ -16,7 +16,7 @@ interface CalendarProps {
   endTime: string
 }
 
-export function Calendar({ eventId, userId, userName, startDate, endDate, startTime, endTime }: CalendarProps) {
+export function UserCalendar({ eventId, userId, userName, startDate, endDate, startTime, endTime }: UserCalendarProps) {
   const [selectedSlots, setSelectedSlots] = useState<Set<string>>(new Set())
   const [isDragging, setIsDragging] = useState(false)
   const [dragMode, setDragMode] = useState<"select" | "deselect" | null>(null)
@@ -49,7 +49,9 @@ export function Calendar({ eventId, userId, userName, startDate, endDate, startT
       if (availabilityResult.availability) {
         const slots = new Set<string>()
         availabilityResult.availability.forEach((item: Availability) => {
-          slots.add(`${item.date}-${item.time}`)
+          const timeWithoutSeconds = item.time.substring(0, 5)
+          const slotKey = `${item.date}-${timeWithoutSeconds}`
+          slots.add(slotKey)
         })
         setSelectedSlots(slots)
       }
