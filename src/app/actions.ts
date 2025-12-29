@@ -264,10 +264,9 @@ export async function getEventAvailability(eventId: string) {
     },
   )
 
-  // Get all availability for this event
   const { data: availabilityData, error: availabilityError } = await supabase
     .from("availability")
-    .select("*")
+    .select("*, users(id, name)")
     .eq("event_id", eventId)
 
   if (availabilityError) {
@@ -285,4 +284,75 @@ export async function getEventAvailability(eventId: string) {
   }
 
   return { availability: availabilityData, totalUsers: totalUsers || 0 }
+}
+
+export async function getEventUsers(eventId: string) {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+          } catch {
+            // Handle cookie setting errors
+          }
+        },
+      },
+    },
+  )
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("event_id", eventId)
+    .order("created_at", { ascending: true })
+
+  if (error) {
+    return { error: error.message, users: [] }
+  }
+
+  return { users: data }
+}
+
+export async function createUser(eventId: string, userName: string) {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+          } catch {
+            // Handle cookie setting errors
+          }
+        },
+      },
+    },
+  )
+
+  const userInput: Omit<CreateUserInput, "id" | "created_at"> = {
+    name: userName.trim(),
+    creator: false,
+    event_id: eventId,
+  }
+
+  const { data, error } = await supabase.from("users").insert(userInput).select().single()
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  revalidatePath("/")
+  return { success: true, userId: data.id }
 }

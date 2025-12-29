@@ -1,9 +1,13 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect } from "react"
-import { getEventAvailability } from "@/app/actions"
+import { getEventAvailability, getEventUsers } from "@/app/actions"
 import { createClient } from "@/lib/supabase/client"
-import type { Availability } from "@/types/availability"
+import { Button } from "@/components/ui/button"
+import { X } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface GroupCalendarProps {
   eventId: string
@@ -14,26 +18,54 @@ interface GroupCalendarProps {
 }
 
 interface AvailabilityCount {
-  [key: string]: number
+  [key: string]: {
+    count: number
+    users: Array<{ id: string; name: string }>
+  }
+}
+
+interface User {
+  id: string
+  name: string
+  creator: boolean
 }
 
 export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime }: GroupCalendarProps) {
   const [availabilityCounts, setAvailabilityCounts] = useState<AvailabilityCount>({})
   const [totalUsers, setTotalUsers] = useState(0)
+  const [users, setUsers] = useState<User[]>([])
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
+  const [hoveredSlot, setHoveredSlot] = useState<string | null>(null)
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
 
   useEffect(() => {
     async function fetchData() {
-      const result = await getEventAvailability(eventId)
+      const [availabilityResult, usersResult] = await Promise.all([
+        getEventAvailability(eventId),
+        getEventUsers(eventId),
+      ])
 
-      if (result.availability) {
+      if (availabilityResult.availability) {
         const counts: AvailabilityCount = {}
-        result.availability.forEach((item: Availability) => {
+        availabilityResult.availability.forEach((item: any) => {
           const timeWithoutSeconds = item.time.substring(0, 5)
           const slotId = `${item.date}-${timeWithoutSeconds}`
-          counts[slotId] = (counts[slotId] || 0) + 1
+
+          if (!counts[slotId]) {
+            counts[slotId] = { count: 0, users: [] }
+          }
+
+          counts[slotId].count++
+          if (item.users) {
+            counts[slotId].users.push({ id: item.users.id, name: item.users.name })
+          }
         })
         setAvailabilityCounts(counts)
-        setTotalUsers(result.totalUsers)
+        setTotalUsers(availabilityResult.totalUsers)
+      }
+
+      if (usersResult.users) {
+        setUsers(usersResult.users)
       }
     }
     fetchData()
@@ -55,7 +87,6 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
       )
       .subscribe()
 
-    // Cleanup subscription on unmount
     return () => {
       supabase.removeChannel(channel)
     }
@@ -111,14 +142,28 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
     return `${displayHour}:${minute.toString().padStart(2, "0")} ${ampm}`
   }
 
-  const getBackgroundColor = (count: number) => {
-    if (count === 0 || totalUsers === 0) {
-      return "bg-muted/30"
+  const getFilteredCount = (slotId: string) => {
+    const slotData = availabilityCounts[slotId]
+    if (!slotData) return { count: 0, users: [] }
+
+    if (selectedUserId) {
+      const isUserAvailable = slotData.users.some((u) => u.id === selectedUserId)
+      return {
+        count: isUserAvailable ? 1 : 0,
+        users: isUserAvailable ? slotData.users.filter((u) => u.id === selectedUserId) : [],
+      }
     }
 
-    const percentage = count / totalUsers
+    return slotData
+  }
 
-    // Different shades of green based on percentage
+  const getBackgroundColor = (count: number, maxCount: number) => {
+    if (count === 0 || maxCount === 0) {
+      return "bg-muted/50"
+    }
+
+    const percentage = count / maxCount
+
     if (percentage >= 0.8) return "bg-green-600"
     if (percentage >= 0.6) return "bg-green-500"
     if (percentage >= 0.4) return "bg-green-400"
@@ -126,17 +171,54 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
     return "bg-green-200"
   }
 
+  const handleMouseMove = (e: React.MouseEvent, slotId: string) => {
+    setHoveredSlot(slotId)
+    setTooltipPosition({ x: e.clientX, y: e.clientY })
+  }
+
+  const handleMouseLeave = () => {
+    setHoveredSlot(null)
+  }
+
+  const selectedUserName = users.find((u) => u.id === selectedUserId)?.name
+
   return (
     <div className="w-full space-y-1 md:space-y-2">
       <div className="h-5" />
 
-      <h2 className="text-lg md:text-xl font-semibold">Group Availability</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg md:text-xl font-semibold">
+          {selectedUserName ? `${selectedUserName}'s Availability` : "Group Availability"}
+        </h2>
+        <div className="flex items-center gap-2">
+          {selectedUserId && (
+            <Button variant="outline" size="sm" onClick={() => setSelectedUserId(null)} className="h-8">
+              <X className="h-4 w-4 mr-1" />
+              Reset
+            </Button>
+          )}
+          <Select value={selectedUserId || ""} onValueChange={(value: any) => setSelectedUserId(value || null)}>
+            <SelectTrigger className="w-[140px] h-8 text-xs">
+              <SelectValue placeholder="Filter by user" />
+            </SelectTrigger>
+            <SelectContent>
+              {users.map((user) => (
+                <SelectItem key={user.id} value={user.id}>
+                  {user.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
       <p className="text-xs md:text-sm text-muted-foreground mb-1">
-        {totalUsers} {totalUsers === 1 ? "person" : "people"} responded
+        {selectedUserId
+          ? "Showing individual availability"
+          : `${totalUsers} ${totalUsers === 1 ? "person" : "people"} responded`}
       </p>
 
-      <div className="p-1 md:p-3">
+      <div className="p-1 md:p-3 relative">
         <div className="select-none">
           <div
             className="grid gap-[1px]"
@@ -168,14 +250,16 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
               {dates.map((date, dateIdx) => {
                 const dateString = date.toISOString().split("T")[0]
                 const slotId = `${dateString}-${time}`
-                const count = availabilityCounts[slotId] || 0
-                const bgColor = getBackgroundColor(count)
+                const { count, users: slotUsers } = getFilteredCount(slotId)
+                const maxCount = selectedUserId ? 1 : totalUsers
+                const bgColor = getBackgroundColor(count, maxCount)
 
                 return (
                   <div
                     key={dateIdx}
-                    className={`p-0 h-4 md:h-7 border flex items-center justify-center ${bgColor}`}
-                    title={`${count} of ${totalUsers} available`}
+                    className={`p-0 h-4 md:h-7 border flex items-center justify-center ${bgColor} relative cursor-default`}
+                    onMouseMove={(e) => handleMouseMove(e, slotId)}
+                    onMouseLeave={handleMouseLeave}
                   >
                     {count > 0 && <span className="text-[8px] md:text-xs font-semibold text-white">{count}</span>}
                   </div>
@@ -184,6 +268,27 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
             </div>
           ))}
         </div>
+
+        {hoveredSlot && availabilityCounts[hoveredSlot] && (
+          <div
+            className="fixed z-50 bg-popover text-popover-foreground shadow-md rounded-md p-2 text-xs pointer-events-none border"
+            style={{
+              left: tooltipPosition.x + 10,
+              top: tooltipPosition.y + 10,
+            }}
+          >
+            {availabilityCounts[hoveredSlot].users.length > 0 ? (
+              <div className="space-y-1">
+                <div className="font-semibold text-muted-foreground">Available:</div>
+                {availabilityCounts[hoveredSlot].users.map((user, idx) => (
+                  <div key={idx}>{user.name}</div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-muted-foreground">No one available</div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

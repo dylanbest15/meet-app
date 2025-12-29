@@ -144,7 +144,7 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
     const isCurrentlySelected = selectedSlots.has(slotId)
 
     dragMode.current = isCurrentlySelected ? "deselect" : "select"
-    isDragging.current = false
+    isDragging.current = true
 
     toggleSlot(date, time)
   }
@@ -163,16 +163,10 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
       } else if (dragMode.current === "deselect" && isCurrentlySelected) {
         toggleSlot(date, time)
       }
-    } else if (dragMode.current !== null) {
-      isDragging.current = true
     }
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (dragMode.current !== null) {
-      isDragging.current = true
-    }
-
     if (isDragging.current && dragMode.current) {
       const touch = e.touches[0]
       const element = document.elementFromPoint(touch.clientX, touch.clientY)

@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label"
 import { createEvent, getEvent, getUser } from "./actions"
 import { UserCalendar } from "@/components/user-calendar"
 import { GroupCalendar } from "@/components/group-calendar"
-import { ChevronLeft } from "lucide-react"
+import { UserSelection } from "@/components/user-selection"
+import { ChevronLeft, Link2 } from "lucide-react"
 
 interface Event {
   name: string
@@ -86,6 +87,20 @@ export default function Home() {
         }
       }
       fetchData()
+    } else if (eventId && !userId) {
+      async function fetchEvent() {
+        try {
+          const eventResult = await getEvent(eventId)
+          if (eventResult.event) {
+            setEvent(eventResult.event)
+          }
+        } catch (error) {
+          console.error("Error fetching event:", error)
+        } finally {
+          setLoading(false)
+        }
+      }
+      fetchEvent()
     } else {
       setLoading(false)
     }
@@ -168,12 +183,41 @@ export default function Home() {
     }
   }
 
+  const [shareSuccess, setShareSuccess] = useState(false)
+
+  const handleShare = async () => {
+    const shareUrl = `${window.location.origin}/?id=${eventId}`
+
+    try {
+      // Check if mobile device
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+
+      if (isMobile && navigator.share) {
+        await navigator.share({
+          title: event?.name || "Event",
+          text: `Join my event: ${event?.name}`,
+          url: shareUrl,
+        })
+      } else {
+        await navigator.clipboard.writeText(shareUrl)
+        setShareSuccess(true)
+        setTimeout(() => setShareSuccess(false), 2000)
+      }
+    } catch (err) {
+      console.error("Error sharing:", err)
+    }
+  }
+
   if (loading) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
         <p className="text-muted-foreground">Loading event...</p>
       </main>
     )
+  }
+
+  if (event && eventId && !userId) {
+    return <UserSelection eventId={eventId} eventName={event.name} />
   }
 
   if (!event && eventId && userId) {
@@ -188,8 +232,15 @@ export default function Home() {
     <main className="flex min-h-screen flex-col p-4 md:p-8">
       <div className="w-full max-w-7xl mx-auto space-y-4">
         {event && (
-          <div className="w-full text-center mb-4">
-            <h1 className="text-2xl md:text-3xl font-bold">{event.name}</h1>
+          <div className="w-full flex items-center justify-between mb-4">
+            <div className="flex-1" />
+            <h1 className="text-2xl md:text-3xl font-bold flex-1 text-center">{event.name}</h1>
+            <div className="flex-1 flex justify-end">
+              <Button onClick={handleShare} variant="outline" size="sm" className="gap-2 bg-transparent">
+                <Link2 className="h-4 w-4" />
+                <span className="hidden sm:inline">{shareSuccess ? "Copied!" : "Share Event"}</span>
+              </Button>
+            </div>
           </div>
         )}
 
