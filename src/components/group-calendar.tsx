@@ -7,7 +7,8 @@ import { getEventAvailability, getEventUsers } from "@/app/actions"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { X } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 interface GroupCalendarProps {
   eventId: string
@@ -34,9 +35,10 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
   const [availabilityCounts, setAvailabilityCounts] = useState<AvailabilityCount>({})
   const [totalUsers, setTotalUsers] = useState(0)
   const [users, setUsers] = useState<User[]>([])
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
   const [hoveredSlot, setHoveredSlot] = useState<string | null>(null)
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
+  const [filterOpen, setFilterOpen] = useState(false)
 
   useEffect(() => {
     async function fetchData() {
@@ -132,6 +134,7 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
       day: days[date.getDay()],
       date: date.getDate(),
       month: months[date.getMonth()],
+      full: `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`,
     }
   }
 
@@ -146,11 +149,11 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
     const slotData = availabilityCounts[slotId]
     if (!slotData) return { count: 0, users: [] }
 
-    if (selectedUserId) {
-      const isUserAvailable = slotData.users.some((u) => u.id === selectedUserId)
+    if (selectedUserIds.length > 0) {
+      const filteredUsers = slotData.users.filter((u) => selectedUserIds.includes(u.id))
       return {
-        count: isUserAvailable ? 1 : 0,
-        users: isUserAvailable ? slotData.users.filter((u) => u.id === selectedUserId) : [],
+        count: filteredUsers.length,
+        users: filteredUsers,
       }
     }
 
@@ -180,45 +183,70 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
     setHoveredSlot(null)
   }
 
-  const selectedUserName = users.find((u) => u.id === selectedUserId)?.name
+  const toggleUser = (userId: string) => {
+    setSelectedUserIds((prev) => (prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]))
+  }
+
+  const getHeaderText = () => {
+    if (selectedUserIds.length === 0) return "Group Availability"
+    if (selectedUserIds.length === 1) {
+      const user = users.find((u) => u.id === selectedUserIds[0])
+      return `${user?.name}'s Availability`
+    }
+    return `${selectedUserIds.length} Users' Availability`
+  }
 
   return (
-    <div className="w-full space-y-1 md:space-y-2">
-      <div className="h-5" />
+    <div className="w-full space-y-0.5 md:space-y-1">
+      <div className="h-4" />
 
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg md:text-xl font-semibold">
-          {selectedUserName ? `${selectedUserName}'s Availability` : "Group Availability"}
-        </h2>
+        <h2 className="text-base md:text-lg font-semibold">{getHeaderText()}</h2>
         <div className="flex items-center gap-2">
-          {selectedUserId && (
-            <Button variant="outline" size="sm" onClick={() => setSelectedUserId(null)} className="h-8">
+          {selectedUserIds.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setSelectedUserIds([])} className="h-8">
               <X className="h-4 w-4 mr-1" />
               Reset
             </Button>
           )}
-          <Select value={selectedUserId || ""} onValueChange={(value: any) => setSelectedUserId(value || null)}>
-            <SelectTrigger className="w-[140px] h-8 text-xs">
-              <SelectValue placeholder="Filter by user" />
-            </SelectTrigger>
-            <SelectContent>
-              {users.map((user) => (
-                <SelectItem key={user.id} value={user.id}>
-                  {user.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 text-xs bg-transparent">
+                Filter by users
+                {selectedUserIds.length > 0 && ` (${selectedUserIds.length})`}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56" align="end">
+              <div className="space-y-2">
+                <div className="font-semibold text-sm">Select users</div>
+                {users.map((user) => (
+                  <div key={user.id} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={user.id}
+                      checked={selectedUserIds.includes(user.id)}
+                      onCheckedChange={() => toggleUser(user.id)}
+                    />
+                    <label
+                      htmlFor={user.id}
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                    >
+                      {user.name}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
-      <p className="text-xs md:text-sm text-muted-foreground mb-1">
-        {selectedUserId
-          ? "Showing individual availability"
+      <p className="text-xs md:text-sm text-muted-foreground">
+        {selectedUserIds.length > 0
+          ? "Showing filtered availability"
           : `${totalUsers} ${totalUsers === 1 ? "person" : "people"} responded`}
       </p>
 
-      <div className="p-1 md:p-3 relative">
+      <div className="p-0.5 md:p-2 relative">
         <div className="select-none">
           <div
             className="grid gap-[1px]"
@@ -244,14 +272,14 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
               className="grid gap-[1px]"
               style={{ gridTemplateColumns: `60px repeat(${dates.length}, minmax(24px, 60px))` }}
             >
-              <div className="sticky left-0 bg-background z-10 px-0.5 py-0.5 text-[8px] md:text-xs font-medium border-r flex items-center justify-center">
+              <div className="sticky left-0 bg-background z-10 px-0.5 text-[8px] md:text-xs font-medium flex items-start justify-center -mt-1.5">
                 {formatTime(time)}
               </div>
               {dates.map((date, dateIdx) => {
                 const dateString = date.toISOString().split("T")[0]
                 const slotId = `${dateString}-${time}`
                 const { count, users: slotUsers } = getFilteredCount(slotId)
-                const maxCount = selectedUserId ? 1 : totalUsers
+                const maxCount = selectedUserIds.length > 0 ? selectedUserIds.length : totalUsers
                 const bgColor = getBackgroundColor(count, maxCount)
 
                 return (
@@ -267,6 +295,18 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
               })}
             </div>
           ))}
+
+          <div
+            className="grid gap-[1px]"
+            style={{ gridTemplateColumns: `60px repeat(${dates.length}, minmax(24px, 60px))` }}
+          >
+            <div className="sticky left-0 bg-background z-10 px-0.5 text-[8px] md:text-xs font-medium flex items-start justify-center -mt-1.5">
+              {formatTime(endTime)}
+            </div>
+            {dates.map((_, dateIdx) => (
+              <div key={dateIdx} />
+            ))}
+          </div>
         </div>
 
         {hoveredSlot && availabilityCounts[hoveredSlot] && (
@@ -277,6 +317,15 @@ export function GroupCalendar({ eventId, startDate, endDate, startTime, endTime 
               top: tooltipPosition.y + 10,
             }}
           >
+            <div className="font-semibold text-xs mb-1">
+              {(() => {
+                const parts = hoveredSlot.split("-")
+                const dateStr = `${parts[0]}-${parts[1]}-${parts[2]}`
+                const timeStr = parts[3]
+                const date = new Date(dateStr)
+                return `${formatDate(date).full} at ${formatTime(timeStr)}`
+              })()}
+            </div>
             {availabilityCounts[hoveredSlot].users.length > 0 ? (
               <div className="space-y-1">
                 <div className="font-semibold text-muted-foreground">Available:</div>

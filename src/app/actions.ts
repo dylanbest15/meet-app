@@ -273,17 +273,10 @@ export async function getEventAvailability(eventId: string) {
     return { error: availabilityError.message, availability: [], totalUsers: 0 }
   }
 
-  // Get total number of users in this event
-  const { count: totalUsers, error: countError } = await supabase
-    .from("users")
-    .select("*", { count: "exact", head: true })
-    .eq("event_id", eventId)
+  const uniqueUserIds = new Set(availabilityData.map((item: any) => item.user_id))
+  const totalUsers = uniqueUserIds.size
 
-  if (countError) {
-    return { error: countError.message, availability: availabilityData, totalUsers: 0 }
-  }
-
-  return { availability: availabilityData, totalUsers: totalUsers || 0 }
+  return { availability: availabilityData, totalUsers }
 }
 
 export async function getEventUsers(eventId: string) {
@@ -355,4 +348,38 @@ export async function createUser(eventId: string, userName: string) {
 
   revalidatePath("/")
   return { success: true, userId: data.id }
+}
+
+export async function verifyEventPassword(eventId: string, password: string) {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+          } catch {
+            // Handle cookie setting errors
+          }
+        },
+      },
+    },
+  )
+
+  const { data, error } = await supabase.from("events").select("password").eq("id", eventId).single()
+
+  if (error) {
+    return { error: error.message, verified: false }
+  }
+
+  if (!data.password) {
+    return { verified: true }
+  }
+
+  return { verified: data.password === password }
 }

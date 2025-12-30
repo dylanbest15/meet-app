@@ -14,9 +14,19 @@ interface UserCalendarProps {
   endDate: string
   startTime: string
   endTime: string
+  onSwitchUser?: () => void // Added callback prop for switching user
 }
 
-export function UserCalendar({ eventId, userId, userName, startDate, endDate, startTime, endTime }: UserCalendarProps) {
+export function UserCalendar({
+  eventId,
+  userId,
+  userName,
+  startDate,
+  endDate,
+  startTime,
+  endTime,
+  onSwitchUser,
+}: UserCalendarProps) {
   const [selectedSlots, setSelectedSlots] = useState<Set<string>>(new Set())
   const isDragging = useRef(false)
   const dragMode = useRef<"select" | "deselect" | null>(null)
@@ -167,6 +177,8 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    e.preventDefault()
+
     if (isDragging.current && dragMode.current) {
       const touch = e.touches[0]
       const element = document.elementFromPoint(touch.clientX, touch.clientY)
@@ -208,8 +220,8 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
   }
 
   return (
-    <div className="w-full space-y-1 md:space-y-2">
-      <div className="h-5 flex items-start">
+    <div className="w-full space-y-0.5 md:space-y-1">
+      <div className="h-4 flex items-start">
         <div
           className={`px-3 py-1 rounded-md text-xs font-medium transition-opacity ${saveStatus === "idle" ? "opacity-0" : "opacity-100"} ${saveStatus === "saving" ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-200" : "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200"}`}
         >
@@ -217,11 +229,21 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
         </div>
       </div>
 
-      <h2 className="text-lg md:text-xl font-semibold">{userName}&apos;s Availability</h2>
+      <div className="flex items-center gap-2 flex-wrap">
+        <h2 className="text-base md:text-lg font-semibold">Your Availability ({userName})</h2>
+        {onSwitchUser && (
+          <button
+            onClick={onSwitchUser}
+            className="text-xs text-muted-foreground hover:text-foreground underline transition-colors"
+          >
+            Not you? Switch user
+          </button>
+        )}
+      </div>
 
-      <p className="text-xs md:text-sm text-muted-foreground mb-1">Click and drag to select your availability</p>
+      <p className="text-xs md:text-sm text-muted-foreground">Click and drag to select your availability</p>
 
-      <div className="p-1 md:p-3">
+      <div className="p-0.5 md:p-2">
         <div className="select-none touch-none" onTouchMove={handleTouchMove}>
           <div
             className="grid gap-[1px]"
@@ -247,7 +269,7 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
               className="grid gap-[1px]"
               style={{ gridTemplateColumns: `60px repeat(${dates.length}, minmax(24px, 60px))` }}
             >
-              <div className="sticky left-0 bg-background z-10 px-0.5 py-0.5 text-[8px] md:text-xs font-medium border-r flex items-center justify-center">
+              <div className="sticky left-0 bg-background z-10 px-0.5 text-[8px] md:text-xs font-medium flex items-start justify-center -mt-1.5">
                 {formatTime(time)}
               </div>
               {dates.map((date, dateIdx) => {
@@ -272,6 +294,18 @@ export function UserCalendar({ eventId, userId, userName, startDate, endDate, st
               })}
             </div>
           ))}
+
+          <div
+            className="grid gap-[1px]"
+            style={{ gridTemplateColumns: `60px repeat(${dates.length}, minmax(24px, 60px))` }}
+          >
+            <div className="sticky left-0 bg-background z-10 px-0.5 text-[8px] md:text-xs font-medium flex items-start justify-center -mt-1.5">
+              {formatTime(endTime)}
+            </div>
+            {dates.map((_, dateIdx) => (
+              <div key={dateIdx} />
+            ))}
+          </div>
         </div>
       </div>
     </div>

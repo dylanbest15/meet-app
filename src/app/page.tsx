@@ -8,14 +8,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { createEvent, getEvent, getUser } from "./actions"
+import { createEvent, getEvent, getUser, verifyEventPassword } from "./actions"
 import { UserCalendar } from "@/components/user-calendar"
 import { GroupCalendar } from "@/components/group-calendar"
 import { UserSelection } from "@/components/user-selection"
+import { PasswordPrompt } from "@/components/password-prompt"
 import { ChevronLeft, Link2 } from "lucide-react"
 
 interface Event {
   name: string
+  password: string | null
   startDate: string
   endDate: string
   startTime: string
@@ -23,11 +25,28 @@ interface Event {
 }
 
 const generateTimeOptions = () => {
-  const times: string[] = []
-  for (let hour = 0; hour < 24; hour++) {
+  const times: { value: string; label: string }[] = []
+  for (let hour = 0; hour <= 24; hour++) {
     for (let minute = 0; minute < 60; minute += 30) {
+      if (hour === 24 && minute > 0) break
+
       const timeString = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`
-      times.push(timeString)
+      let displayHour: number
+      let period: string
+
+      if (hour === 0 || hour === 24) {
+        displayHour = 12
+        period = hour === 0 ? "AM" : "AM"
+      } else if (hour < 12) {
+        displayHour = hour
+        period = "AM"
+      } else {
+        displayHour = hour > 12 ? hour - 12 : hour
+        period = "PM"
+      }
+
+      const label = `${displayHour}:${minute.toString().padStart(2, "0")} ${period}`
+      times.push({ value: timeString, label })
     }
   }
   return times
@@ -37,6 +56,7 @@ export default function Home() {
   const searchParams = useSearchParams()
   const eventId = searchParams.get("id") || ""
   const userId = searchParams.get("user") || ""
+  const justCreated = searchParams.get("created") === "true"
 
   const [userName, setUserName] = useState("")
   const [name, setName] = useState("")
@@ -54,6 +74,9 @@ export default function Home() {
   const [event, setEvent] = useState<Event | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentUserName, setCurrentUserName] = useState<string>("")
+  const [isCreator, setIsCreator] = useState(false)
+  const [passwordVerified, setPasswordVerified] = useState(false)
+  const [needsPassword, setNeedsPassword] = useState(false)
 
   const timeOptions = generateTimeOptions()
 
@@ -68,17 +91,44 @@ export default function Home() {
     setStartTime("09:00")
     setEndTime("17:00")
 
-    if (eventId && userId) {
-      async function fetchData() {
+    if (eventId) {
+      async function loadEvent() {
         try {
-          const [eventResult, userResult] = await Promise.all([getEvent(eventId), getUser(userId)])
+          const eventResult = await getEvent(eventId)
 
           if (eventResult.event) {
             setEvent(eventResult.event)
-          }
 
-          if (userResult.user) {
-            setCurrentUserName(userResult.user.name)
+            if (eventResult.event.password && !justCreated) {
+              const storedPassword = sessionStorage.getItem(`event-${eventId}-password`)
+
+              if (storedPassword) {
+                const { verified } = await verifyEventPassword(eventId, storedPassword)
+                if (verified) {
+                  setPasswordVerified(true)
+                  setNeedsPassword(false)
+                } else {
+                  sessionStorage.removeItem(`event-${eventId}-password`)
+                  setNeedsPassword(true)
+                  setLoading(false)
+                  return
+                }
+              } else {
+                setNeedsPassword(true)
+                setLoading(false)
+                return
+              }
+            } else {
+              setPasswordVerified(true)
+            }
+
+            if (userId) {
+              const userResult = await getUser(userId)
+              if (userResult.user) {
+                setCurrentUserName(userResult.user.name)
+                setIsCreator(userResult.user.creator || false)
+              }
+            }
           }
         } catch (error) {
           console.error("Error fetching data:", error)
@@ -86,25 +136,11 @@ export default function Home() {
           setLoading(false)
         }
       }
-      fetchData()
-    } else if (eventId && !userId) {
-      async function fetchEvent() {
-        try {
-          const eventResult = await getEvent(eventId)
-          if (eventResult.event) {
-            setEvent(eventResult.event)
-          }
-        } catch (error) {
-          console.error("Error fetching event:", error)
-        } finally {
-          setLoading(false)
-        }
-      }
-      fetchEvent()
+      loadEvent()
     } else {
       setLoading(false)
     }
-  }, [eventId, userId])
+  }, [eventId, userId, justCreated])
 
   const today = new Date().toISOString().split("T")[0]
   const maxEndDate = (() => {
@@ -167,6 +203,7 @@ export default function Home() {
       setMessage({ type: "error", text: result.error })
     } else {
       setMessage({ type: "success", text: "Event created successfully!" })
+      setLoading(true)
       setUserName("")
       setName("")
       setPassword("")
@@ -178,7 +215,7 @@ export default function Home() {
       setCurrentStep(1)
 
       if (result.eventId && result.userId) {
-        router.push(`/?id=${result.eventId}&user=${result.userId}`)
+        router.push(`/?id=${result.eventId}&user=${result.userId}&created=true`)
       }
     }
   }
@@ -189,7 +226,6 @@ export default function Home() {
     const shareUrl = `${window.location.origin}/?id=${eventId}`
 
     try {
-      // Check if mobile device
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
 
       if (isMobile && navigator.share) {
@@ -208,44 +244,68 @@ export default function Home() {
     }
   }
 
+  const handlePasswordVerify = async (password: string): Promise<boolean> => {
+    const { verified } = await verifyEventPassword(eventId, password)
+
+    if (verified) {
+      sessionStorage.setItem(`event-${eventId}-password`, password)
+      setPasswordVerified(true)
+      setNeedsPassword(false)
+      setLoading(false)
+    }
+
+    return verified
+  }
+
+  const handleSwitchUser = () => {
+    // Remove userId from URL to trigger user selection screen
+    router.push(`/?id=${eventId}`)
+  }
+
   if (loading) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
+      <main className="flex flex-col items-center justify-center p-2 md:p-4 min-h-screen py-4 md:py-4">
         <p className="text-muted-foreground">Loading event...</p>
       </main>
     )
   }
 
-  if (event && eventId && !userId) {
+  if (needsPassword && event && !justCreated) {
+    return <PasswordPrompt eventName={event.name} onVerify={handlePasswordVerify} />
+  }
+
+  if (event && eventId && !userId && passwordVerified) {
     return <UserSelection eventId={eventId} eventName={event.name} />
   }
 
   if (!event && eventId && userId) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center p-4 md:p-8">
+      <main className="flex flex-col items-center justify-center p-2 md:p-4 py-4 md:py-4">
         <p className="text-destructive">Event not found</p>
       </main>
     )
   }
 
   return (
-    <main className="flex min-h-screen flex-col p-4 md:p-8">
-      <div className="w-full max-w-7xl mx-auto space-y-4">
-        {event && (
-          <div className="w-full flex items-center justify-between mb-4">
-            <div className="flex-1" />
-            <h1 className="text-2xl md:text-3xl font-bold flex-1 text-center">{event.name}</h1>
-            <div className="flex-1 flex justify-end">
-              <Button onClick={handleShare} variant="outline" size="sm" className="gap-2 bg-transparent">
-                <Link2 className="h-4 w-4" />
-                <span className="hidden sm:inline">{shareSuccess ? "Copied!" : "Share Event"}</span>
-              </Button>
-            </div>
-          </div>
-        )}
+    <main className="flex flex-col items-center p-2 md:p-4 py-4 md:py-4">
+      {event && (
+        <div className="w-full md:w-auto mb-2 md:mb-4 pl-2 md:pl-0 md:text-center">
+          <h1 className="text-xl md:text-2xl font-bold">{event.name}</h1>
+        </div>
+      )}
 
+      {event && isCreator && (
+        <div className="w-full md:w-auto mb-4 md:mb-0 md:fixed md:top-4 md:right-4 md:z-50 px-2 md:px-0">
+          <Button onClick={handleShare} variant="outline" className="w-full md:w-auto gap-2 bg-background shadow-sm">
+            <Link2 className="h-4 w-4" />
+            <span>{shareSuccess ? "Copied!" : "Share Event"}</span>
+          </Button>
+        </div>
+      )}
+
+      <div className="w-full max-w-7xl mx-auto space-y-1">
         {event && (
-          <div className="w-full md:grid md:grid-cols-2 md:gap-8 md:pt-2">
+          <div className="w-full md:grid md:grid-cols-2 md:gap-8">
             <div className="flex justify-center">
               <UserCalendar
                 eventId={eventId}
@@ -255,6 +315,7 @@ export default function Home() {
                 endDate={event.endDate}
                 startTime={event.startTime}
                 endTime={event.endTime}
+                onSwitchUser={handleSwitchUser} // Added switch user callback
               />
             </div>
             <div className="flex justify-center mt-8 md:mt-0">
@@ -270,197 +331,199 @@ export default function Home() {
         )}
 
         {!event && (
-          <div className="w-full max-w-4xl space-y-6">
-            <div className="text-center space-y-2">
-              <h1 className="text-3xl md:text-4xl font-bold text-balance">Meet App</h1>
-              <p className="text-muted-foreground">Create your first event</p>
-            </div>
+          <div className="flex justify-center items-center min-h-[calc(100vh-8rem)]">
+            <div className="w-full max-w-4xl space-y-6 px-4 md:px-0">
+              <div className={`text-center space-y-2 ${currentStep === 2 ? "hidden md:block" : ""}`}>
+                <h1 className="text-4xl font-bold">Meet App</h1>
+                <p className="text-muted-foreground">Create your first event</p>
+              </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {currentStep === 2 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setCurrentStep(1)}
-                  className="md:hidden flex items-center gap-2"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Back
-                </Button>
-              )}
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {currentStep === 2 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setCurrentStep(1)}
+                    className="md:hidden flex items-center gap-2"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Back
+                  </Button>
+                )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className={`space-y-4 ${currentStep === 2 ? "hidden md:block" : ""}`}>
-                  <div className="space-y-2">
-                    <Label htmlFor="user-name">Your Name</Label>
-                    <Input
-                      id="user-name"
-                      type="text"
-                      placeholder="Enter your name"
-                      value={userName}
-                      onChange={(e) => setUserName(e.target.value)}
-                      disabled={isLoading}
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="event-name">Event Name</Label>
-                    <Input
-                      id="event-name"
-                      type="text"
-                      placeholder="Enter event name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      disabled={isLoading}
-                      required
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-lg border border-border bg-muted/50 p-4">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="require-password" className="text-base font-medium cursor-pointer">
-                        Require Password
-                      </Label>
-                      <p className="text-sm text-muted-foreground">Make this event private</p>
-                    </div>
-                    <Switch
-                      id="require-password"
-                      checked={requirePassword}
-                      onCheckedChange={setRequirePassword}
-                      disabled={isLoading}
-                    />
-                  </div>
-
-                  {requirePassword && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className={`space-y-4 ${currentStep === 2 ? "hidden md:block" : ""}`}>
                     <div className="space-y-2">
+                      <Label htmlFor="user-name">Your Name</Label>
                       <Input
+                        id="user-name"
                         type="text"
-                        placeholder="Enter event password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Enter your name"
+                        value={userName}
+                        onChange={(e) => setUserName(e.target.value)}
                         disabled={isLoading}
-                        required={requirePassword}
+                        required
                       />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="event-name">Event Name</Label>
+                      <Input
+                        id="event-name"
+                        type="text"
+                        placeholder="Enter event name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        disabled={isLoading}
+                        required
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-lg border border-border bg-muted/50 p-4">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="require-password" className="text-base font-medium cursor-pointer">
+                          Require Password
+                        </Label>
+                        <p className="text-sm text-muted-foreground">Make this event private</p>
+                      </div>
+                      <Switch
+                        id="require-password"
+                        checked={requirePassword}
+                        onCheckedChange={setRequirePassword}
+                        disabled={isLoading}
+                      />
+                    </div>
+
+                    {requirePassword && (
+                      <div className="space-y-2">
+                        <Input
+                          type="text"
+                          placeholder="Enter event password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          disabled={isLoading}
+                          required={requirePassword}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className={`space-y-4 ${currentStep === 1 ? "hidden md:block" : ""}`}>
+                    <div className="space-y-3 rounded-lg border border-border bg-muted/50 p-4">
+                      <Label className="text-base font-medium">Event Date Range</Label>
+                      <p className="text-sm text-muted-foreground">Select the possible dates for this event</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="start-date" className="text-sm">
+                            Start Date
+                          </Label>
+                          <Input
+                            id="start-date"
+                            type="date"
+                            value={startDate}
+                            onChange={(e) => handleStartDateChange(e.target.value)}
+                            min={today}
+                            disabled={isLoading}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="end-date" className="text-sm">
+                            End Date
+                          </Label>
+                          <Input
+                            id="end-date"
+                            type="date"
+                            value={endDate}
+                            onChange={(e) => setEndDate(e.target.value)}
+                            min={startDate || today}
+                            max={maxEndDate}
+                            disabled={isLoading}
+                            required
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 rounded-lg border border-border bg-muted/50 p-4">
+                      <Label className="text-base font-medium">Event Time Range</Label>
+                      <p className="text-sm text-muted-foreground">Select the possible time window (e.g., 9am-5pm)</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="start-time" className="text-sm">
+                            No Earlier than
+                          </Label>
+                          <select
+                            id="start-time"
+                            value={startTime}
+                            onChange={(e) => setStartTime(e.target.value)}
+                            disabled={isLoading}
+                            required
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {timeOptions.map((time) => (
+                              <option key={time.value} value={time.value}>
+                                {time.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="end-time" className="text-sm">
+                            No Later than
+                          </Label>
+                          <select
+                            id="end-time"
+                            value={endTime}
+                            onChange={(e) => setEndTime(e.target.value)}
+                            disabled={isLoading}
+                            required
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {timeOptions.map((time) => (
+                              <option key={time.value} value={time.value}>
+                                {time.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {currentStep === 1 && (
+                  <Button
+                    type="button"
+                    onClick={() => setCurrentStep(2)}
+                    className="w-full md:hidden"
+                    disabled={!isStep1Valid()}
+                  >
+                    Continue
+                  </Button>
+                )}
+
+                <div className={`space-y-4 ${currentStep === 1 ? "hidden md:block" : ""}`}>
+                  <div className="flex justify-center md:justify-end">
+                    <Button type="submit" className="w-full md:w-auto md:px-12" disabled={isLoading || !isFormValid()}>
+                      {isLoading ? "Creating..." : "Create New Event"}
+                    </Button>
+                  </div>
+
+                  {message && (
+                    <div
+                      className={`p-3 rounded-lg text-sm ${
+                        message.type === "success"
+                          ? "bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200"
+                          : "bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200"
+                      }`}
+                    >
+                      {message.text}
                     </div>
                   )}
                 </div>
-
-                <div className={`space-y-4 ${currentStep === 1 ? "hidden md:block" : ""}`}>
-                  <div className="space-y-3 rounded-lg border border-border bg-muted/50 p-4">
-                    <Label className="text-base font-medium">Event Date Range</Label>
-                    <p className="text-sm text-muted-foreground">Select the possible dates for this event</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="start-date" className="text-sm">
-                          Start Date
-                        </Label>
-                        <Input
-                          id="start-date"
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => handleStartDateChange(e.target.value)}
-                          min={today}
-                          disabled={isLoading}
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="end-date" className="text-sm">
-                          End Date
-                        </Label>
-                        <Input
-                          id="end-date"
-                          type="date"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          min={startDate || today}
-                          max={maxEndDate}
-                          disabled={isLoading}
-                          required
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 rounded-lg border border-border bg-muted/50 p-4">
-                    <Label className="text-base font-medium">Event Time Range</Label>
-                    <p className="text-sm text-muted-foreground">Select the possible time window (e.g., 8am-5pm)</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="start-time" className="text-sm">
-                          Start Time
-                        </Label>
-                        <select
-                          id="start-time"
-                          value={startTime}
-                          onChange={(e) => setStartTime(e.target.value)}
-                          disabled={isLoading}
-                          required
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {timeOptions.map((time) => (
-                            <option key={time} value={time}>
-                              {time}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="end-time" className="text-sm">
-                          End Time
-                        </Label>
-                        <select
-                          id="end-time"
-                          value={endTime}
-                          onChange={(e) => setEndTime(e.target.value)}
-                          disabled={isLoading}
-                          required
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {timeOptions.map((time) => (
-                            <option key={time} value={time}>
-                              {time}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {currentStep === 1 && (
-                <Button
-                  type="button"
-                  onClick={() => setCurrentStep(2)}
-                  className="w-full md:hidden"
-                  disabled={!isStep1Valid()}
-                >
-                  Choose Dates
-                </Button>
-              )}
-
-              <div className={`space-y-4 ${currentStep === 1 ? "hidden md:block" : ""}`}>
-                <div className="flex justify-center md:justify-end">
-                  <Button type="submit" className="w-full md:w-auto md:px-12" disabled={isLoading || !isFormValid()}>
-                    {isLoading ? "Creating..." : "Create New Event"}
-                  </Button>
-                </div>
-
-                {message && (
-                  <div
-                    className={`p-3 rounded-lg text-sm ${
-                      message.type === "success"
-                        ? "bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200"
-                        : "bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200"
-                    }`}
-                  >
-                    {message.text}
-                  </div>
-                )}
-              </div>
-            </form>
+              </form>
+            </div>
           </div>
         )}
       </div>
