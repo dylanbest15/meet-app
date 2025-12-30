@@ -287,16 +287,24 @@ export default function Home() {
   }
 
   return (
-    <main className="flex flex-col items-center p-2 md:p-4 py-4 md:py-4">
+    <main className="flex flex-col items-center p-2 md:p-4 py-4 md:py-8">
       {event && (
-        <div className="w-full md:w-auto mb-2 md:mb-4 pl-2 md:pl-0 md:text-center">
-          <h1 className="text-xl md:text-2xl font-bold">{event.name}</h1>
+        <div className="w-full max-w-7xl mx-auto mb-2 md:mb-4 pl-2 md:pl-0">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-center md:gap-4">
+            <h1 className="text-xl md:text-2xl font-bold md:text-center">{event.name}</h1>
+            {isCreator && (
+              <Button onClick={handleShare} variant="outline" className="hidden md:flex gap-2 bg-background shadow-sm">
+                <Link2 className="h-4 w-4" />
+                <span>{shareSuccess ? "Copied!" : "Share Event"}</span>
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
       {event && isCreator && (
-        <div className="w-full md:w-auto mb-4 md:mb-0 md:fixed md:top-4 md:right-4 md:z-50 px-2 md:px-0">
-          <Button onClick={handleShare} variant="outline" className="w-full md:w-auto gap-2 bg-background shadow-sm">
+        <div className="w-full md:hidden mb-4 px-2">
+          <Button onClick={handleShare} variant="outline" className="w-full gap-2 bg-background shadow-sm">
             <Link2 className="h-4 w-4" />
             <span>{shareSuccess ? "Copied!" : "Share Event"}</span>
           </Button>
@@ -331,7 +339,7 @@ export default function Home() {
         )}
 
         {!event && (
-          <div className="flex justify-center items-center min-h-[calc(100vh-8rem)]">
+          <div className="flex justify-center items-center min-h-[calc(100vh-8rem)] pt-8 md:pt-4">
             <div className="w-full max-w-4xl space-y-6 px-4 md:px-0">
               <div className={`text-center space-y-2 ${currentStep === 2 ? "hidden md:block" : ""}`}>
                 <h1 className="text-4xl font-bold">Meet App</h1>
